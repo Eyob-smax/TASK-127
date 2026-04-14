@@ -51,7 +51,6 @@ Desktop.ini
 *.wixpdb
 
 # Temporary and audit working files
-.tmp/
 *.pyc
 __pycache__/
 repo/desktop/tmp_check_migration.py
