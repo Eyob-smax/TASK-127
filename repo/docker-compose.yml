@@ -1,0 +1,41 @@
+services:
+  build-test:
+    build:
+      context: ./desktop
+      dockerfile: Dockerfile
+      target: test-runner
+    image: proctorops-build-test:latest
+
+    # No ports exposed. ProctorOps is an offline desktop application.
+    # Docker is used exclusively for reproducible build and headless test
+    # execution. The production runtime is a native Windows 11 desktop app.
+
+    environment:
+      # QT_QPA_PLATFORM=offscreen: headless Qt rendering, no display required.
+      - QT_QPA_PLATFORM=offscreen
+      # Print failed test output immediately.
+      - CTEST_OUTPUT_ON_FAILURE=1
+
+    volumes:
+      # Source is mounted read-only so the container never writes to the host.
+      # The build output goes to the named volume (build_cache) for incremental
+      # rebuilds — avoids re-downloading Qt or re-compiling unchanged files.
+      - ./desktop:/workspace:ro
+      - build_cache:/workspace/build
+
+    working_dir: /workspace
+
+    # No network_mode: host — the app has no network dependencies.
+    # No depends_on — this is a single-service build/test environment.
+    #
+    # Canonical test entry point: use repo/run_tests.sh (docker-first orchestrator).
+    # That script runs `docker compose run --rm build-test bash -c "..."`
+    # with CTest filter support, --rebuild, --unit-only, and --api-only flags.
+    # Running `docker compose up` directly uses the Dockerfile CMD (ctest only,
+    # no rebuild step — useful when the build cache is already warm).
+    # Do not pass `./run_tests.sh` as a container command because /workspace maps
+    # to repo/desktop and the host orchestrator script is outside that mount.
+
+volumes:
+  build_cache:
+    driver: local

@@ -1,0 +1,16 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <!--
+        ProctorOps Qt Resource File
+        Icons, fonts, and static assets are added here as they are authored.
+        Placeholder structure; resources are added as UI modules are implemented.
+
+        Planned resource categories:
+          - icons/: application icon, tray icon, toolbar icons
+          - fonts/: any bundled fonts for the UI
+          - styles/: optional QSS stylesheets for the kiosk layout
+    -->
+    <qresource prefix="/">
+        <!-- Resources added as UI modules are implemented -->
+    </qresource>
+</RCC>
