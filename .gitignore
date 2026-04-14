@@ -1,7 +1,4 @@
 # Build outputs
-repo/desktop/build/
-build/
-build-*/
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
