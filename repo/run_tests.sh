@@ -17,52 +17,6 @@
 # Requirements:
 #   - Docker Engine 24+ with compose v2 plugin
 #   - Run from the TASK-127 root directory (i.e., bash repo/run_tests.sh)
-#
-# Test suites (27 unit tests, 13 integration tests):
-#
-#   Unit tests (unit_tests/):
-#     tst_bootstrap              — Qt Test framework bootstrap
-#     tst_app_settings           — AppSettings defaults, round-trip, path honesty
-#     tst_domain_validation      — domain model invariants, Validation.h constants
-#     tst_migration              — schema_migrations infrastructure
-#     tst_crypto                 — SecureRandom, Argon2id, AES-GCM, Ed25519 Verifier+Signer, HashChain
-#     tst_auth_service           — sign-in, lockout, CAPTCHA, step-up, RBAC, console lock
-#     tst_audit_chain            — audit hash chain linkage, PII encryption
-#     tst_clipboard_guard        — clipboard masking and PII redaction
-#     tst_masked_field           — MaskingPolicy field masking rules
-#     tst_question_service       — question CRUD, query builder, KP tree, mappings, tags
-#     tst_checkin_service        — check-in flow, mobile normalization, corrections
-#     tst_job_scheduler          — priority, dependency, retry, fairness, worker cap, crash recovery
-#     tst_job_checkpoint         — checkpoint save/restore across phases
-#     tst_ingestion_service      — JSONL/CSV import pipeline, lifecycle
-#     tst_action_routing         — named action registry, shortcut dispatch
-#     tst_command_palette        — Ctrl+K fuzzy action search
-#     tst_workspace_state        — workspace state persistence
-#     tst_crash_recovery         — crash detection and restoration
-#     tst_tray_mode              — system tray state transitions, kiosk mode
-#     tst_checkin_window         — CheckInWindow UI structure
-#     tst_question_editor        — QuestionEditorDialog UI structure
-#     tst_audit_viewer           — AuditViewerWindow UI structure
-#     tst_sync_service           — signing key management, package import, conflicts
-#     tst_update_service         — package staging, rollback, install history
-#     tst_data_subject_service   — GDPR export/deletion workflows, redaction
-#     tst_security_admin_window  — SecurityAdminWindow tab/button structure
-#     tst_privileged_scope       — RBAC, step-up, masking, state machines, validation
-#
-#   Integration tests (api_tests/):
-#     tst_api_bootstrap          — test infrastructure bootstrap
-#     tst_schema_constraints     — schema constraint enforcement
-#     tst_auth_integration       — full auth flow with real DB
-#     tst_audit_integration      — audit chain integrity, PII encryption
-#     tst_package_verification   — Ed25519 + SHA-256 package verification
-#     tst_checkin_flow           — full check-in with dedup and deduction
-#     tst_correction_flow        — correction request → approve → apply
-#     tst_shell_recovery         — crash detection, workspace restoration
-#     tst_operator_workflows     — check-in + question governance integration
-#     tst_export_flow            — GDPR export → fulfill → redaction → audit
-#     tst_sync_import_flow       — sync package verify → import → conflict → key revocation
-#     tst_update_flow            — update import → stage → apply → rollback
-#     tst_privileged_scope_api   — privileged flows, compliance evidence, authorization
 
 set -euo pipefail
 
@@ -171,10 +125,10 @@ API_TARGETS_CMAKE="${API_TARGETS[*]}"
 
 echo ""
 echo "[2/3] Running tests inside Docker container..."
-# Qt6_DIR is set by the Dockerfile ENV and inherited automatically.
-# The cmake invocation here must match the Dockerfile builder stage exactly.
+
 CONTAINER_SCRIPT="$(cat <<'EOF'
 set -euo pipefail
+
 echo "Configuring CMake..."
 cmake -B build -S . -G Ninja \
     -DCMAKE_BUILD_TYPE=Debug \
@@ -203,25 +157,33 @@ ctest "${CTEST_ARGS[@]}"
 
 echo ""
 echo "-- Test Summary --"
+
 COUNT_ARGS=(-N)
 if [[ -n "${RUN_EFFECTIVE_FILTER}" ]]; then
     COUNT_ARGS+=(-R "${RUN_EFFECTIVE_FILTER}")
 fi
-TOTAL=$(ctest "${COUNT_ARGS[@]}" 2>/dev/null | tail -1 | grep -oE '[0-9]+' || echo '?')
+
+TOTAL="$(ctest "${COUNT_ARGS[@]}" 2>/dev/null | tail -1 | grep -oE '[0-9]+' || true)"
+TOTAL="${TOTAL:-?}"
 
 CASE_TOTAL=0
+shopt -s nullglob
 for exe in unit_tests/tst_* api_tests/tst_*; do
     if [[ -x "${exe}" ]]; then
-        fn_count=$("./${exe}" -functions 2>/dev/null | sed '/^[[:space:]]*$/d' | wc -l | tr -d '[:space:]')
+        fn_output="$("./${exe}" -functions 2>/dev/null || true)"
+        fn_count="$(printf '%s\n' "${fn_output}" | sed '/^[[:space:]]*$/d' | wc -l | tr -d '[:space:]')"
+        fn_count="${fn_count:-0}"
         CASE_TOTAL=$((CASE_TOTAL + fn_count))
     fi
 done
+shopt -u nullglob
 
 echo "Total test targets: ${TOTAL}"
 echo "Total QTest functions: ${CASE_TOTAL}"
 EOF
 )"
 
+set +e
 docker compose -f "${COMPOSE_FILE}" run --rm \
     -e CTEST_OUTPUT_ON_FAILURE=1 \
     -e QT_QPA_PLATFORM=offscreen \
@@ -231,8 +193,8 @@ docker compose -f "${COMPOSE_FILE}" run --rm \
     -e RUN_UNIT_TARGETS="${UNIT_TARGETS_CMAKE}" \
     -e RUN_API_TARGETS="${API_TARGETS_CMAKE}" \
     build-test bash -lc "${CONTAINER_SCRIPT}"
-
 EXIT_CODE=$?
+set -e
 
 echo ""
 echo "[3/3] Cleaning up..."
@@ -249,4 +211,4 @@ else
     echo "=========================================="
 fi
 
-exit ${EXIT_CODE}
+exit "${EXIT_CODE}"
