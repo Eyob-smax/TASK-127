@@ -41,7 +41,6 @@
 #include "crypto/Ed25519Signer.h"
 #include "crypto/Ed25519Verifier.h"
 #include "utils/Migration.h"
-#include "utils/Validation.h"
 #include "models/CommonTypes.h"
 #include "models/Audit.h"
 #include "models/Update.h"
@@ -104,9 +103,12 @@ private:
     int m_dbIndex = 0;
 
     static const QByteArray s_masterKey;
+    // Password shared by all test users so createStepUpWindow can authenticate them.
+    static const QString s_adminPassword;
 };
 
 const QByteArray TstPrivilegedScope::s_masterKey = QByteArray(32, '\x70');
+const QString TstPrivilegedScope::s_adminPassword = QStringLiteral("AdminPriv12!!");
 
 void TstPrivilegedScope::initTestCase()
 {
@@ -153,6 +155,15 @@ void TstPrivilegedScope::insertUser(const QString& userId, const QString& userna
     q.addBindValue(now);
     q.addBindValue(now);
     QVERIFY2(q.exec(), qPrintable(q.lastError().text()));
+
+    // Insert Argon2id credentials so createStepUpWindow can authenticate via AuthService.
+    auto hashRes = Argon2idHasher::hashPassword(s_adminPassword);
+    QVERIFY2(hashRes.isOk(), "Failed to hash password for test user");
+    UserRepository userRepo(m_db);
+    Credential cred = hashRes.value();
+    cred.userId = userId;
+    QVERIFY2(userRepo.upsertCredential(cred).isOk(),
+             qPrintable(QStringLiteral("Failed to insert credentials for ") + userId));
 }
 
 void TstPrivilegedScope::insertMember(const QString& id, const QString& memberId,
@@ -184,40 +195,33 @@ void TstPrivilegedScope::insertMember(const QString& id, const QString& memberId
 
 QString TstPrivilegedScope::createStepUpWindow(const QString& userId)
 {
-    const QString sessionToken = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    const QString stepUpId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    const QString now = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
-    const QString expiresAt = QDateTime::currentDateTimeUtc()
-                                  .addSecs(Validation::StepUpWindowSeconds)
-                                  .toString(Qt::ISODateWithMs);
-
-    QSqlQuery q(m_db);
-    q.prepare(QStringLiteral(
-        "INSERT INTO user_sessions (token, user_id, created_at, last_active_at, active) "
-        "VALUES (?, ?, ?, ?, 1)"));
-    q.addBindValue(sessionToken);
-    q.addBindValue(userId);
-    q.addBindValue(now);
-    q.addBindValue(now);
-    if (!q.exec()) {
-        qWarning() << "createStepUpWindow user_sessions insert failed:" << q.lastError().text();
+    // Look up username so we can sign in by name.
+    QSqlQuery uq(m_db);
+    uq.prepare(QStringLiteral("SELECT username FROM users WHERE id = ?"));
+    uq.addBindValue(userId);
+    if (!uq.exec() || !uq.next()) {
+        qWarning() << "createStepUpWindow: user not found in DB for id:" << userId;
         return QString{};
     }
+    const QString username = uq.value(0).toString();
 
-    q.prepare(QStringLiteral(
-        "INSERT INTO step_up_windows (id, user_id, session_token, granted_at, expires_at, consumed) "
-        "VALUES (?, ?, ?, ?, ?, 0)"));
-    q.addBindValue(stepUpId);
-    q.addBindValue(userId);
-    q.addBindValue(sessionToken);
-    q.addBindValue(now);
-    q.addBindValue(expiresAt);
-    if (!q.exec()) {
-        qWarning() << "createStepUpWindow step_up_windows insert failed:" << q.lastError().text();
+    UserRepository userRepo(m_db);
+    AuditRepository auditRepo(m_db);
+    AuthService auth(userRepo, auditRepo);
+
+    auto signInResult = auth.signIn(username, s_adminPassword);
+    if (signInResult.isErr()) {
+        qWarning() << "createStepUpWindow: signIn failed for" << username
+                   << ":" << signInResult.errorMessage();
         return QString{};
     }
-
-    return stepUpId;
+    auto stepUpResult = auth.initiateStepUp(signInResult.value().token, s_adminPassword);
+    if (stepUpResult.isErr()) {
+        qWarning() << "createStepUpWindow: initiateStepUp failed for" << username
+                   << ":" << stepUpResult.errorMessage();
+        return QString{};
+    }
+    return stepUpResult.value().id;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

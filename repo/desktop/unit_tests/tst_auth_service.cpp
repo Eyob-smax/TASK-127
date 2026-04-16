@@ -63,6 +63,18 @@ private slots:
     // ── Audit events ─────────────────────────────────────────────────────
     void test_auditEventsRecorded();
 
+    // ── Privileged and bootstrap branches ───────────────────────────────
+    void test_requireStepUp_missingWindow();
+    void test_requireStepUp_validWindow();
+    void test_authorizePrivilegedAction_stepUpOwnedByAnotherActor();
+    void test_changeUserRole_success();
+    void test_unlockUser_clearsLockout();
+    void test_deactivateUser_selfDenied();
+    void test_deactivateUser_success();
+    void test_refreshCaptcha_persistsState();
+    void test_bootstrapSecurityAdministrator_successThenDisabled();
+    void test_bootstrapSecurityAdministrator_shortPasswordRejected();
+
 private:
     void applySchema();
     void createTestUser(const QString& userId, const QString& username,
@@ -657,12 +669,25 @@ void TstAuthService::test_captcha_cooldownResets()
     q.addBindValue(QStringLiteral("admin"));
     QVERIFY(q.exec());
 
-    // After cooldown, sign-in should no longer require the expired CAPTCHA
-    // (the service should either accept the login or re-issue a fresh CAPTCHA)
+    // After cooldown expiry, the service must not block indefinitely on the stale state.
+    // Two valid behaviors: the expired state is cleared and login succeeds, OR a fresh
+    // CAPTCHA is re-issued (because the failure count persists).
     auto afterCooldown = auth.signIn(QStringLiteral("admin"), s_testPassword);
-    // The expired CAPTCHA state should not block a correct password indefinitely
-    // Either the login succeeds or a fresh CAPTCHA is issued
-    QVERIFY(afterCooldown.isOk() || afterCooldown.errorCode() == ErrorCode::CaptchaRequired);
+    if (afterCooldown.isOk()) {
+        // Expired CAPTCHA was cleared — verify the returned session is valid.
+        QVERIFY2(!afterCooldown.value().token.isEmpty(),
+                 "Sign-in after CAPTCHA cooldown must return a non-empty session token");
+        QCOMPARE(afterCooldown.value().userId, QStringLiteral("u1"));
+    } else {
+        // A fresh CAPTCHA was re-issued — verify the new state has a future expiry,
+        // not the stale expired one that was injected above.
+        QCOMPARE(afterCooldown.errorCode(), ErrorCode::CaptchaRequired);
+        auto freshState = userRepo.getCaptchaState(QStringLiteral("admin"));
+        QVERIFY2(freshState.isOk(), "A fresh CAPTCHA state must exist after re-issuance");
+        const auto newExpiry = freshState.value().expiresAt;
+        QVERIFY2(newExpiry > QDateTime::currentDateTimeUtc(),
+                 "Re-issued CAPTCHA must have a future expiry, not the stale expired state");
+    }
 }
 
 void TstAuthService::test_signIn_lockedAccountRejectsEvenWithCaptcha()
@@ -728,6 +753,238 @@ void TstAuthService::test_auditEventsRecorded()
     }
     QVERIFY2(foundLogin, "Login audit event must be recorded");
     QVERIFY2(foundLogout, "Logout audit event must be recorded");
+}
+
+void TstAuthService::test_requireStepUp_missingWindow()
+{
+    createTestUser(QStringLiteral("u1"), QStringLiteral("admin"), s_testPassword,
+                   Role::SecurityAdministrator);
+
+    UserRepository userRepo(m_db);
+    AuditRepository auditRepo(m_db);
+    AuthService auth(userRepo, auditRepo);
+
+    auto loginResult = auth.signIn(QStringLiteral("admin"), s_testPassword);
+    QVERIFY(loginResult.isOk());
+
+    auto result = auth.requireStepUp(loginResult.value().token);
+    QVERIFY(result.isErr());
+    QCOMPARE(result.errorCode(), ErrorCode::StepUpRequired);
+}
+
+void TstAuthService::test_requireStepUp_validWindow()
+{
+    createTestUser(QStringLiteral("u1"), QStringLiteral("admin"), s_testPassword,
+                   Role::SecurityAdministrator);
+
+    UserRepository userRepo(m_db);
+    AuditRepository auditRepo(m_db);
+    AuthService auth(userRepo, auditRepo);
+
+    auto loginResult = auth.signIn(QStringLiteral("admin"), s_testPassword);
+    QVERIFY(loginResult.isOk());
+
+    auto stepUp = auth.initiateStepUp(loginResult.value().token, s_testPassword);
+    QVERIFY(stepUp.isOk());
+
+    auto result = auth.requireStepUp(loginResult.value().token);
+    QVERIFY(result.isOk());
+}
+
+void TstAuthService::test_authorizePrivilegedAction_stepUpOwnedByAnotherActor()
+{
+    createTestUser(QStringLiteral("u1"), QStringLiteral("admin1"), s_testPassword,
+                   Role::SecurityAdministrator);
+    createTestUser(QStringLiteral("u2"), QStringLiteral("admin2"), s_testPassword,
+                   Role::SecurityAdministrator);
+
+    UserRepository userRepo(m_db);
+    AuditRepository auditRepo(m_db);
+    AuthService auth(userRepo, auditRepo);
+
+    auto login1 = auth.signIn(QStringLiteral("admin1"), s_testPassword);
+    auto login2 = auth.signIn(QStringLiteral("admin2"), s_testPassword);
+    QVERIFY(login1.isOk());
+    QVERIFY(login2.isOk());
+
+    auto stepUp2 = auth.initiateStepUp(login2.value().token, s_testPassword);
+    QVERIFY(stepUp2.isOk());
+
+    auto result = auth.authorizePrivilegedAction(
+        QStringLiteral("u1"),
+        Role::SecurityAdministrator,
+        stepUp2.value().id);
+    QVERIFY(result.isErr());
+    QCOMPARE(result.errorCode(), ErrorCode::AuthorizationDenied);
+}
+
+void TstAuthService::test_changeUserRole_success()
+{
+    createTestUser(QStringLiteral("u-admin"), QStringLiteral("admin"), s_testPassword,
+                   Role::SecurityAdministrator);
+    createTestUser(QStringLiteral("u-target"), QStringLiteral("target"),
+                   QStringLiteral("TargetPass12!!"), Role::FrontDeskOperator);
+
+    UserRepository userRepo(m_db);
+    AuditRepository auditRepo(m_db);
+    AuthService auth(userRepo, auditRepo);
+
+    auto adminSession = auth.signIn(QStringLiteral("admin"), s_testPassword);
+    QVERIFY(adminSession.isOk());
+
+    auto stepUp = auth.initiateStepUp(adminSession.value().token, s_testPassword);
+    QVERIFY(stepUp.isOk());
+
+    auto result = auth.changeUserRole(QStringLiteral("u-admin"),
+                                      QStringLiteral("u-target"),
+                                      Role::Proctor,
+                                      stepUp.value().id);
+    QVERIFY(result.isOk());
+
+    auto updated = userRepo.findUserById(QStringLiteral("u-target"));
+    QVERIFY(updated.isOk());
+    QCOMPARE(updated.value().role, Role::Proctor);
+}
+
+void TstAuthService::test_unlockUser_clearsLockout()
+{
+    createTestUser(QStringLiteral("u-admin"), QStringLiteral("admin"), s_testPassword,
+                   Role::SecurityAdministrator);
+    createTestUser(QStringLiteral("u-target"), QStringLiteral("target"),
+                   QStringLiteral("TargetPass12!!"), Role::FrontDeskOperator);
+
+    UserRepository userRepo(m_db);
+    AuditRepository auditRepo(m_db);
+    AuthService auth(userRepo, auditRepo);
+
+    // Seed target as locked with a lockout record.
+    auto lockStatus = userRepo.updateUserStatus(QStringLiteral("u-target"), UserStatus::Locked);
+    QVERIFY(lockStatus.isOk());
+
+    LockoutRecord rec;
+    rec.username = QStringLiteral("target");
+    rec.failedAttempts = Validation::LockoutFailureThreshold;
+    rec.firstFailAt = QDateTime::currentDateTimeUtc().addSecs(-10);
+    rec.lockedAt = QDateTime::currentDateTimeUtc().addSecs(-5);
+    QVERIFY(userRepo.upsertLockoutRecord(rec).isOk());
+
+    auto adminSession = auth.signIn(QStringLiteral("admin"), s_testPassword);
+    QVERIFY(adminSession.isOk());
+    auto stepUp = auth.initiateStepUp(adminSession.value().token, s_testPassword);
+    QVERIFY(stepUp.isOk());
+
+    auto result = auth.unlockUser(QStringLiteral("u-admin"),
+                                  QStringLiteral("u-target"),
+                                  stepUp.value().id);
+    QVERIFY(result.isOk());
+
+    auto target = userRepo.findUserById(QStringLiteral("u-target"));
+    QVERIFY(target.isOk());
+    QCOMPARE(target.value().status, UserStatus::Active);
+
+    auto lockout = userRepo.getLockoutRecord(QStringLiteral("target"));
+    QVERIFY(lockout.isErr());
+    QCOMPARE(lockout.errorCode(), ErrorCode::NotFound);
+}
+
+void TstAuthService::test_deactivateUser_selfDenied()
+{
+    createTestUser(QStringLiteral("u-admin"), QStringLiteral("admin"), s_testPassword,
+                   Role::SecurityAdministrator);
+
+    UserRepository userRepo(m_db);
+    AuditRepository auditRepo(m_db);
+    AuthService auth(userRepo, auditRepo);
+
+    auto adminSession = auth.signIn(QStringLiteral("admin"), s_testPassword);
+    QVERIFY(adminSession.isOk());
+    auto stepUp = auth.initiateStepUp(adminSession.value().token, s_testPassword);
+    QVERIFY(stepUp.isOk());
+
+    auto result = auth.deactivateUser(QStringLiteral("u-admin"),
+                                      QStringLiteral("u-admin"),
+                                      stepUp.value().id);
+    QVERIFY(result.isErr());
+    QCOMPARE(result.errorCode(), ErrorCode::ValidationFailed);
+}
+
+void TstAuthService::test_deactivateUser_success()
+{
+    createTestUser(QStringLiteral("u-admin"), QStringLiteral("admin"), s_testPassword,
+                   Role::SecurityAdministrator);
+    createTestUser(QStringLiteral("u-target"), QStringLiteral("target"),
+                   QStringLiteral("TargetPass12!!"), Role::Proctor);
+
+    UserRepository userRepo(m_db);
+    AuditRepository auditRepo(m_db);
+    AuthService auth(userRepo, auditRepo);
+
+    auto adminSession = auth.signIn(QStringLiteral("admin"), s_testPassword);
+    QVERIFY(adminSession.isOk());
+    auto stepUp = auth.initiateStepUp(adminSession.value().token, s_testPassword);
+    QVERIFY(stepUp.isOk());
+
+    auto result = auth.deactivateUser(QStringLiteral("u-admin"),
+                                      QStringLiteral("u-target"),
+                                      stepUp.value().id);
+    QVERIFY(result.isOk());
+
+    auto target = userRepo.findUserById(QStringLiteral("u-target"));
+    QVERIFY(target.isOk());
+    QCOMPARE(target.value().status, UserStatus::Deactivated);
+}
+
+void TstAuthService::test_refreshCaptcha_persistsState()
+{
+    UserRepository userRepo(m_db);
+    AuditRepository auditRepo(m_db);
+    AuthService auth(userRepo, auditRepo);
+
+    auto result = auth.refreshCaptcha(QStringLiteral("admin"));
+    QVERIFY(result.isOk());
+    QVERIFY(!result.value().challengeId.isEmpty());
+    QVERIFY(!result.value().answerHashHex.isEmpty());
+
+    auto state = userRepo.getCaptchaState(QStringLiteral("admin"));
+    QVERIFY(state.isOk());
+    QCOMPARE(state.value().challengeId, result.value().challengeId);
+    QCOMPARE(state.value().answerHashHex, result.value().answerHashHex);
+}
+
+void TstAuthService::test_bootstrapSecurityAdministrator_successThenDisabled()
+{
+    UserRepository userRepo(m_db);
+    AuditRepository auditRepo(m_db);
+    AuthService auth(userRepo, auditRepo);
+
+    QVERIFY(!auth.hasAnySecurityAdministrator());
+
+    auto bootstrap = auth.bootstrapSecurityAdministrator(
+        QStringLiteral("firstadmin"),
+        QStringLiteral("BootstrapPass12!!"));
+    QVERIFY(bootstrap.isOk());
+    QVERIFY(bootstrap.value().active);
+
+    QVERIFY(auth.hasAnySecurityAdministrator());
+
+    auto secondBootstrap = auth.bootstrapSecurityAdministrator(
+        QStringLiteral("another"),
+        QStringLiteral("AnotherPass12!!"));
+    QVERIFY(secondBootstrap.isErr());
+    QCOMPARE(secondBootstrap.errorCode(), ErrorCode::AuthorizationDenied);
+}
+
+void TstAuthService::test_bootstrapSecurityAdministrator_shortPasswordRejected()
+{
+    UserRepository userRepo(m_db);
+    AuditRepository auditRepo(m_db);
+    AuthService auth(userRepo, auditRepo);
+
+    auto bootstrap = auth.bootstrapSecurityAdministrator(
+        QStringLiteral("firstadmin"),
+        QStringLiteral("short"));
+    QVERIFY(bootstrap.isErr());
+    QCOMPARE(bootstrap.errorCode(), ErrorCode::ValidationFailed);
 }
 
 QTEST_MAIN(TstAuthService)

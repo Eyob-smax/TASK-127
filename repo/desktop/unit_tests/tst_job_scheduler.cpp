@@ -61,6 +61,10 @@ private slots:
     void test_scheduleJob_createsJob();
     void test_scheduleJob_invalidPriority();
 
+    // ── Scheduler execution path ────────────────────────────────────────
+    void test_scheduler_startStop_idempotent();
+    void test_scheduler_recoverCrash_maxRetryMarkedFailed();
+
 private:
     void applySchema();
     void createTestUser();
@@ -553,6 +557,76 @@ void TstJobScheduler::test_scheduleJob_invalidPriority()
                                           15, s_userId);
     QVERIFY(result.isErr());
     QCOMPARE(result.errorCode(), ErrorCode::ValidationFailed);
+}
+
+void TstJobScheduler::test_scheduler_startStop_idempotent()
+{
+    IngestionRepository ingRepo(m_db);
+    QuestionRepository qRepo(m_db);
+    KnowledgePointRepository kpRepo(m_db);
+    MemberRepository memberRepo(m_db);
+    AuditRepository auditRepo(m_db);
+    AesGcmCipher cipher(s_masterKey);
+    AuditService auditSvc(auditRepo, cipher);
+    UserRepository userRepo(m_db);
+    AuthService authSvc(userRepo, auditRepo);
+    IngestionService ingSvc(ingRepo, qRepo, kpRepo, memberRepo, auditSvc, authSvc, cipher);
+    JobScheduler scheduler(ingRepo, ingSvc, auditSvc);
+
+    QCOMPARE(scheduler.activeWorkerCount(), 0);
+
+    scheduler.start();
+    QTest::qWait(20);
+    scheduler.start(); // idempotent
+
+    QVERIFY(scheduler.activeWorkerCount() >= 0);
+
+    scheduler.stop();
+    scheduler.stop(); // idempotent
+    QCOMPARE(scheduler.activeWorkerCount(), 0);
+}
+
+void TstJobScheduler::test_scheduler_recoverCrash_maxRetryMarkedFailed()
+{
+    IngestionRepository ingRepo(m_db);
+
+    IngestionJob job;
+    job.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    job.type = JobType::QuestionImport;
+    job.status = JobStatus::Claimed;
+    job.priority = 5;
+    job.sourceFilePath = m_tempFilePath;
+    job.createdAt = QDateTime::currentDateTimeUtc();
+    job.retryCount = Validation::SchedulerMaxRetries;
+    job.currentPhase = JobPhase::Validate;
+    job.createdByUserId = s_userId;
+    QVERIFY(ingRepo.insertJob(job).isOk());
+
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("UPDATE ingestion_jobs SET status = 'Claimed', retry_count = ? WHERE id = ?"));
+    q.addBindValue(Validation::SchedulerMaxRetries);
+    q.addBindValue(job.id);
+    QVERIFY(q.exec());
+
+    QuestionRepository qRepo(m_db);
+    KnowledgePointRepository kpRepo(m_db);
+    MemberRepository memberRepo(m_db);
+    AuditRepository auditRepo(m_db);
+    AesGcmCipher cipher(s_masterKey);
+    AuditService auditSvc(auditRepo, cipher);
+    UserRepository userRepo(m_db);
+    AuthService authSvc(userRepo, auditRepo);
+    IngestionService ingSvc(ingRepo, qRepo, kpRepo, memberRepo, auditSvc, authSvc, cipher);
+    JobScheduler scheduler(ingRepo, ingSvc, auditSvc);
+
+    scheduler.start();
+    QTest::qWait(30);
+    scheduler.stop();
+
+    auto updated = ingRepo.getJob(job.id);
+    QVERIFY(updated.isOk());
+    QCOMPARE(updated.value().status, JobStatus::Failed);
+    QVERIFY(updated.value().lastError.contains(QStringLiteral("Max retries exceeded"), Qt::CaseInsensitive));
 }
 
 QTEST_MAIN(TstJobScheduler)

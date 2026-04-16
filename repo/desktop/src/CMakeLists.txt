@@ -62,6 +62,7 @@ qt_add_executable(ProctorOps
     # ── Application shell ────────────────────────────────────────────────────
     app/Application.cpp
     app/AppContext.cpp
+    app/AppBootstrap.cpp
     app/AppSettings.cpp
     app/ActionRouter.cpp
     app/WorkspaceState.cpp

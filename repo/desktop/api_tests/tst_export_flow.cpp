@@ -22,8 +22,10 @@
 #include "services/AuthService.h"
 #include "services/DataSubjectService.h"
 #include "crypto/AesGcmCipher.h"
+#include "crypto/Argon2idHasher.h"
 #include "utils/Migration.h"
 #include "models/Audit.h"
+#include "models/CommonTypes.h"
 
 static void runMigrations(QSqlDatabase& db)
 {
@@ -48,38 +50,38 @@ private:
     QString m_memberId;
     QString m_encName;
 
+    // Password shared by all test users so issueStepUpWindow can authenticate them.
+    static const QString s_adminPassword;
+
+    // Obtain a fresh step-up window for the given userId by signing in via the real
+    // AuthService and calling initiateStepUp. This exercises the full grant path
+    // rather than bypassing it with raw SQL.
     QString issueStepUpWindow(const QString& userId)
     {
-        const QString sessionToken = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        const QString stepUpId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        const QString now = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
-        const QString expiresAt = QDateTime::currentDateTimeUtc().addSecs(120).toString(Qt::ISODateWithMs);
-
-        QSqlQuery q(m_db);
-        q.prepare(QStringLiteral("INSERT INTO user_sessions (token, user_id, created_at, last_active_at, active) "
-                                 "VALUES (?, ?, ?, ?, 1)"));
-        q.addBindValue(sessionToken);
-        q.addBindValue(userId);
-        q.addBindValue(now);
-        q.addBindValue(now);
-        if (!q.exec()) {
-            qWarning() << "issueStepUpWindow user_sessions insert failed:" << q.lastError().text();
+        // Look up username so we can sign in by name.
+        QSqlQuery uq(m_db);
+        uq.prepare(QStringLiteral("SELECT username FROM users WHERE id = ?"));
+        uq.addBindValue(userId);
+        if (!uq.exec() || !uq.next()) {
+            qWarning() << "issueStepUpWindow: user not found for id:" << userId;
             return QString{};
         }
+        const QString username = uq.value(0).toString();
 
-        q.prepare(QStringLiteral("INSERT INTO step_up_windows (id, user_id, session_token, granted_at, expires_at, consumed) "
-                                 "VALUES (?, ?, ?, ?, ?, 0)"));
-        q.addBindValue(stepUpId);
-        q.addBindValue(userId);
-        q.addBindValue(sessionToken);
-        q.addBindValue(now);
-        q.addBindValue(expiresAt);
-        if (!q.exec()) {
-            qWarning() << "issueStepUpWindow step_up_windows insert failed:" << q.lastError().text();
+        auto signInResult = m_authService->signIn(username, s_adminPassword);
+        if (signInResult.isErr()) {
+            qWarning() << "issueStepUpWindow: signIn failed for" << username
+                       << ":" << signInResult.errorMessage();
             return QString{};
         }
-
-        return stepUpId;
+        auto stepUpResult = m_authService->initiateStepUp(signInResult.value().token,
+                                                           s_adminPassword);
+        if (stepUpResult.isErr()) {
+            qWarning() << "issueStepUpWindow: initiateStepUp failed for" << username
+                       << ":" << stepUpResult.errorMessage();
+            return QString{};
+        }
+        return stepUpResult.value().id;
     }
 
 private slots:
@@ -108,6 +110,16 @@ private slots:
         m_authService  = new AuthService(*m_userRepo, *m_auditRepo);
         m_service      = new DataSubjectService(*m_auditRepo, *m_memberRepo,
                                                 *m_authService, *m_auditService, *m_cipher);
+
+        // Set up Argon2id credentials for u-admin so issueStepUpWindow can sign in.
+        {
+            auto hashRes = Argon2idHasher::hashPassword(s_adminPassword);
+            QVERIFY2(hashRes.isOk(), "Failed to hash admin password for test setup");
+            Credential cred = hashRes.value();
+            cred.userId = QStringLiteral("u-admin");
+            QVERIFY2(m_userRepo->upsertCredential(cred).isOk(),
+                     "Failed to upsert admin credential");
+        }
 
         // Insert test member with encrypted PII
         m_memberId = QStringLiteral("m-export-test");
@@ -299,6 +311,8 @@ private slots:
         QVERIFY(found);
     }
 };
+
+const QString TstExportFlow::s_adminPassword = QStringLiteral("ExportAdminPw12!");
 
 QTEST_MAIN(TstExportFlow)
 #include "tst_export_flow.moc"
