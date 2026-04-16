@@ -3,7 +3,7 @@
 Requirement-to-test mapping for static audit review.
 All tests run headless (`QT_QPA_PLATFORM=offscreen`) with in-memory SQLite (`:memory:`).
 
-**Summary:** 27 unit test files + 13 integration test files (40 CTest targets total).
+**Summary:** 39 unit test files + 13 integration test files (52 CTest targets total).
 `repo/run_tests.sh` reports both selected target count and aggregate QTest function count for each run.
 
 ---
@@ -123,9 +123,17 @@ All tests run headless (`QT_QPA_PLATFORM=offscreen`) with in-memory SQLite (`:me
 | Command palette (Ctrl+K) | tst_command_palette | — | Fuzzy search, keyboard navigation, action dispatch |
 | System tray / kiosk mode | tst_tray_mode (state transitions x5, kiosk x6) | — | Mode transitions, lock state, operator-safe exit |
 | CheckInWindow structure | tst_checkin_window | — | 3-tab layout, result panel, correction button |
-| QuestionBankWindow structure | tst_question_editor | — | Paginated table, filter panel, editor dialog |
+| QuestionBankWindow structure | tst_question_bank_window | — | Paginated table, filter panel, initial data load, activateFilter focus |
 | AuditViewerWindow structure | tst_audit_viewer | — | Date filter, table, detail pane, chain verify |
+| LoginWindow structure | tst_login_window | — | Sign-in form layout, CAPTCHA hidden by default, bootstrap-mode transition |
+| SyncWindow structure | tst_sync_window | — | Packages/Conflicts/Signing Keys tabs, row-scoped actions disabled until selection |
+| UpdateWindow structure | tst_update_window | — | Staged/History/Rollback tabs, apply/cancel/rollback gated by row selection |
+| DataSubjectWindow structure | tst_data_subject_window | — | Export/Deletion tabs, fulfill/approve/complete actions disabled until selection |
+| IngestionMonitorWindow structure | tst_ingestion_monitor_window | — | Job table schema, unavailable-service status message, cancel button gating |
 | SecurityAdminWindow structure | tst_security_admin_window (7 tests) | — | 3-tab layout, button states, step-up gates |
+| MainShell MDI workspace | tst_main_shell | — | Window deduplication by ID, workspace state sync on close, crash-restore reopens tracked windows, lock/unlock signals, shell action registration |
+| Application startup lifecycle | tst_application | — | DB open after initialize(), cold-start ms >= 0, app_lifecycle row written, clean shutdown closes record |
+| AppContext ownership and defaults | tst_app_context | — | Unauthenticated by default, empty session userId, owned component pointers retained |
 | Schema constraints | tst_domain_validation | tst_schema_constraints | UNIQUE, CHECK, FK, default values |
 | Migration infrastructure | tst_migration | — | Sequential ordering, schema_migrations tracking |
 

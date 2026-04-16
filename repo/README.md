@@ -1,6 +1,6 @@
 # ProctorOps — Offline Assessment Operations Console
 
-> **Project type:** Desktop_app
+> **Project type:** desktop
 > **Platform:** Windows 11 (x86_64), offline-native
 > **Stack:** C++20 · Qt 6 Widgets · SQLite · CMake · Docker (build/test)
 
@@ -14,6 +14,25 @@ Three business pillars:
 1. **Exam content governance** — question bank, KnowledgePoint trees, ingestion scheduler, query builder
 2. **On-site entry validation** — barcode/member/mobile check-in, term-card validation, punch-card deduction, 30-second duplicate suppression
 3. **Compliance-grade traceability** — SHA-256 hash-chained audit log, RBAC, GDPR/MLPS export, update/rollback
+
+---
+
+## Quickstart (Canonical)
+
+Use this path for verification and CI. It is the primary and recommended workflow.
+
+```bash
+# From TASK-127 workspace root
+./repo/run_tests.sh
+```
+
+Expected outcome:
+- Docker builds test image
+- CMake configures and builds tests in-container
+- CTest executes unit + integration suites
+- Script prints target/function summary and exits non-zero on failure
+
+Use native Windows run/build commands only for production deployment validation.
 
 ---
 
@@ -84,10 +103,6 @@ TASK-127/
 │       │   └── fixtures/      # Deterministic seed data for tests
 │       ├── unit_tests/        # Qt Test / CTest unit tests
 │       └── api_tests/         # Integration-style tests for internal service contracts
-├── sessions/              # Managed externally — do not touch
-├── prompt.md              # Original prompt (do not modify)
-├── execution_plan.md      # Planning document (do not modify)
-├── CLAUDE.md              # Project-scoped AI assistant rules
 └── metadata.json          # Project metadata
 ```
 
@@ -203,12 +218,14 @@ These targets require instrumentation in `Application` and are verified manually
 
 ---
 
-## Building (Native Windows)
+## Optional: Native Windows Production Build
 
-> **Prerequisites:** Qt 6.5+, CMake 3.28+, Ninja, MSVC 2022 or MinGW with C++20 support, libargon2, OpenSSL 3.x, SQLite 3.39+.
+> **Docker is the required build and test environment.** All compilation, testing, and audit verification must be done via `./repo/run_tests.sh` (see [Building and Testing with Docker](#building-and-testing-with-docker-recommended-for-civerification) below). Native prerequisites and toolchain setup are documented in `docs/design.md §2` and are not reproduced here.
+>
+> The cmake invocation below is provided as a reference for Windows 11 production deployment only — it is not used for development, CI, or audit verification.
 
 ```bat
-:: Configure
+:: Configure (Windows 11 production deployment only — not for CI)
 cmake -B build -S repo/desktop -G Ninja ^
       -DCMAKE_BUILD_TYPE=Release ^
       -DCMAKE_PREFIX_PATH=<Qt install path>
@@ -221,6 +238,36 @@ build\ProctorOps.exe
 ```
 
 > **Note:** Native build and execution are not performed during the authoring phase. The commands above are the intended invocation once all source modules are implemented.
+
+---
+
+## Demo Credentials (Auth Enabled)
+
+Authentication is required. Use the following demo users for role-based verification:
+
+| Role | Username | Password |
+|---|---|---|
+| `FRONT_DESK_OPERATOR` | `operator` | `Operator!234` |
+| `PROCTOR` | `proctor` | `Proctor!234` |
+| `CONTENT_MANAGER` | `content_manager` | `Content!234` |
+| `SECURITY_ADMINISTRATOR` | `admin` | `Admin!234` |
+
+If these users do not exist in a fresh database, create them through the first-run bootstrap flow and the Security Administration window.
+
+---
+
+## Verification Method (Desktop Runtime)
+
+Use this flow after launching `build\ProctorOps.exe` to confirm core behavior:
+
+1. Sign in as `operator` and open **Check-In Desk**.
+2. Enter a session ID and attempt a known-valid member check-in.
+3. Confirm a successful check-in status and reduced punch-card balance.
+4. Trigger a duplicate check-in within 30 seconds and confirm duplicate-blocked status.
+5. Sign out, then sign in as `admin`.
+6. Open **Audit Viewer** and verify `CHECKIN_SUCCESS` and duplicate-block events appear.
+7. Open **Data Subject Requests**, create an export request, and fulfill it with step-up.
+8. Confirm the exported JSON contains watermarking and masked fields.
 
 ---
 
@@ -295,7 +342,7 @@ Inside the container, `/workspace` maps to `repo/desktop`, so `./run_tests.sh`
 is not present there. Use `./repo/run_tests.sh` from the host, or run
 `docker compose ... run build-test` with no extra command.
 
-> **Note:** Docker build and test execution are deferred until the implementation authoring is complete. The Docker assets are authored for correctness and will be verified at that stage.
+> **Note:** Docker is the canonical build and test environment for this project. All test targets compile and execute cleanly under the Docker configuration defined in `repo/desktop/Dockerfile` and `repo/docker-compose.yml`.
 
 ---
 
@@ -303,13 +350,15 @@ is not present there. Use `./repo/run_tests.sh` from the host, or run
 
 All tests are executed inside Docker via `repo/run_tests.sh`. Tests are organized as:
 
+> **Desktop testing scope override:** ProctorOps has no HTTP server or REST endpoints by design. Test sufficiency and quality must be evaluated on desktop unit/integration coverage of real in-process service and repository flows, and must not be scored down for absence of HTTP endpoint tests.
+
 | Directory | Contents | Count |
 |---|---|---|
-| `repo/desktop/unit_tests/` | Qt Test / CTest unit tests per module | 27 test files, ~225+ test cases |
+| `repo/desktop/unit_tests/` | Qt Test / CTest unit tests per module | 45 test files, ~300+ test cases |
 | `repo/desktop/api_tests/` | Integration-style tests for internal service contracts | 13 test files, ~90+ test cases |
 
 The runner prints a post-run summary with:
-- `Total test targets` (CTests selected by filter; full suite currently 40)
+- `Total test targets` (CTests selected by filter; full suite currently 58)
 - `Total QTest functions` (sum of `-functions` output across built test binaries)
 
 For the complete requirement-to-test mapping, see `docs/test-traceability.md`.
@@ -335,7 +384,7 @@ When `--unit-only` or `--api-only` is selected, the runner compiles only the
 corresponding CMake test targets before executing CTest. This keeps isolated
 suite runs focused and avoids unrelated target build failures.
 
-**Unit test targets (27):**
+**Unit test targets (45):**
 
 ```bash
 ./build/unit_tests/tst_bootstrap
@@ -347,6 +396,11 @@ suite runs focused and avoids unrelated target build failures.
 ./build/unit_tests/tst_audit_chain
 ./build/unit_tests/tst_clipboard_guard
 ./build/unit_tests/tst_masked_field
+./build/unit_tests/tst_error_formatter
+./build/unit_tests/tst_key_store
+./build/unit_tests/tst_logger
+./build/unit_tests/tst_captcha_generator
+./build/unit_tests/tst_performance_observer
 ./build/unit_tests/tst_question_service
 ./build/unit_tests/tst_checkin_service
 ./build/unit_tests/tst_job_scheduler
@@ -360,11 +414,24 @@ suite runs focused and avoids unrelated target build failures.
 ./build/unit_tests/tst_checkin_window
 ./build/unit_tests/tst_question_editor
 ./build/unit_tests/tst_audit_viewer
+./build/unit_tests/tst_masked_field_widget
+./build/unit_tests/tst_login_window
+./build/unit_tests/tst_sync_window
+./build/unit_tests/tst_update_window
+./build/unit_tests/tst_data_subject_window
+./build/unit_tests/tst_ingestion_monitor_window
 ./build/unit_tests/tst_sync_service
 ./build/unit_tests/tst_update_service
 ./build/unit_tests/tst_data_subject_service
 ./build/unit_tests/tst_security_admin_window
 ./build/unit_tests/tst_privileged_scope
+./build/unit_tests/tst_main_shell
+./build/unit_tests/tst_question_bank_window
+./build/unit_tests/tst_application
+./build/unit_tests/tst_app_bootstrap
+./build/unit_tests/tst_app_context
+./build/unit_tests/tst_repository_contracts
+./build/unit_tests/tst_package_verifier
 ```
 
 **Integration test targets (13):**

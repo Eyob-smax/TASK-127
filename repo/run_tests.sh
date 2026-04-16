@@ -6,13 +6,14 @@
 #
 # Usage:
 #   ./repo/run_tests.sh [--rebuild] [--test-filter <pattern>]
-#                        [--unit-only] [--api-only]
+#                        [--unit-only] [--api-only] [--coverage]
 #
 # Options:
 #   --rebuild        Force a full Docker image rebuild before running tests.
 #   --test-filter    Pass a CTest regex filter to run only matching tests.
 #   --unit-only      Run only unit tests (unit_tests/ targets).
 #   --api-only       Run only integration tests (api_tests/ targets).
+#   --coverage       Run tests with gcov instrumentation and print coverage summary.
 #
 # Requirements:
 #   - Docker Engine 24+ with compose v2 plugin
@@ -30,6 +31,7 @@ REBUILD=false
 TEST_FILTER=""
 UNIT_ONLY=false
 API_ONLY=false
+COVERAGE=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -50,9 +52,13 @@ while [[ $# -gt 0 ]]; do
             API_ONLY=true
             shift
             ;;
+        --coverage)
+            COVERAGE=true
+            shift
+            ;;
         *)
             echo "Unknown argument: $1" >&2
-            echo "Usage: $0 [--rebuild] [--test-filter <pattern>] [--unit-only] [--api-only]" >&2
+            echo "Usage: $0 [--rebuild] [--test-filter <pattern>] [--unit-only] [--api-only] [--coverage]" >&2
             exit 1
             ;;
     esac
@@ -69,11 +75,16 @@ SUITE_FILTER=""
 UNIT_TARGETS=(
     tst_bootstrap tst_app_settings tst_domain_validation tst_migration tst_crypto
     tst_auth_service tst_audit_chain tst_clipboard_guard tst_masked_field
+    tst_error_formatter tst_key_store tst_logger tst_captcha_generator tst_performance_observer
     tst_question_service tst_checkin_service tst_job_scheduler tst_job_checkpoint
     tst_ingestion_service tst_action_routing tst_command_palette tst_workspace_state
     tst_crash_recovery tst_tray_mode tst_checkin_window tst_question_editor
-    tst_audit_viewer tst_sync_service tst_update_service tst_data_subject_service
+    tst_audit_viewer tst_masked_field_widget tst_login_window tst_sync_window tst_update_window
+    tst_data_subject_window tst_ingestion_monitor_window
+    tst_sync_service tst_update_service tst_data_subject_service
     tst_security_admin_window tst_privileged_scope
+    tst_main_shell tst_question_bank_window tst_application tst_app_bootstrap tst_app_context
+    tst_repository_contracts tst_package_verifier
 )
 
 API_TARGETS=(
@@ -84,7 +95,7 @@ API_TARGETS=(
 )
 
 if [[ "${UNIT_ONLY}" == "true" ]]; then
-    SUITE_FILTER="tst_(bootstrap|app_settings|domain_validation|migration|crypto|auth_service|audit_chain|clipboard_guard|masked_field|question_service|checkin_service|job_scheduler|job_checkpoint|ingestion_service|action_routing|command_palette|workspace_state|crash_recovery|tray_mode|checkin_window|question_editor|audit_viewer|sync_service|update_service|data_subject_service|security_admin_window|privileged_scope)"
+    SUITE_FILTER="tst_(bootstrap|app_settings|domain_validation|migration|crypto|auth_service|audit_chain|clipboard_guard|masked_field|error_formatter|key_store|logger|captcha_generator|performance_observer|question_service|checkin_service|job_scheduler|job_checkpoint|ingestion_service|action_routing|command_palette|workspace_state|crash_recovery|tray_mode|checkin_window|question_editor|audit_viewer|masked_field_widget|login_window|sync_window|update_window|data_subject_window|ingestion_monitor_window|sync_service|update_service|data_subject_service|security_admin_window|privileged_scope|main_shell|question_bank_window|application|app_bootstrap|app_context|repository_contracts|package_verifier)"
 elif [[ "${API_ONLY}" == "true" ]]; then
     SUITE_FILTER="tst_(api_bootstrap|schema_constraints|auth_integration|audit_integration|package_verification|checkin_flow|correction_flow|shell_recovery|operator_workflows|export_flow|sync_import_flow|update_flow|privileged_scope_api)"
 fi
@@ -99,12 +110,13 @@ echo "=========================================="
 echo "  Compose file: ${COMPOSE_FILE}"
 echo "  Rebuild:      ${REBUILD}"
 if [[ "${UNIT_ONLY}" == "true" ]]; then
-    echo "  Suite:        unit tests only (27 targets)"
+    echo "  Suite:        unit tests only (45 targets)"
 elif [[ "${API_ONLY}" == "true" ]]; then
     echo "  Suite:        integration tests only (13 targets)"
 else
-    echo "  Suite:        all tests (27 unit + 13 integration)"
+    echo "  Suite:        all tests (45 unit + 13 integration)"
 fi
+echo "  Coverage:     ${COVERAGE}"
 echo "  Test filter:  ${EFFECTIVE_FILTER:-<all>}"
 echo "=========================================="
 
@@ -129,12 +141,25 @@ echo "[2/3] Running tests inside Docker container..."
 CONTAINER_SCRIPT="$(cat <<'EOF'
 set -euo pipefail
 
+BUILD_DIR="build"
+CMAKE_EXTRA_FLAGS=()
+if [[ "${RUN_COVERAGE}" == "true" ]]; then
+    BUILD_DIR="/tmp/build-cov"
+    CMAKE_EXTRA_FLAGS=(
+        -DCMAKE_CXX_FLAGS=--coverage\ -O0\ -g
+        -DCMAKE_C_FLAGS=--coverage\ -O0\ -g
+        -DCMAKE_EXE_LINKER_FLAGS=--coverage
+        -DCMAKE_SHARED_LINKER_FLAGS=--coverage
+    )
+fi
+
 echo "Configuring CMake..."
-cmake -B build -S . -G Ninja \
+cmake -B "${BUILD_DIR}" -S . -G Ninja \
     -DCMAKE_BUILD_TYPE=Debug \
     -DCMAKE_CXX_COMPILER=g++ \
     -DCMAKE_C_COMPILER=gcc \
-    -DQt6_DIR="${Qt6_DIR}"
+    -DQt6_DIR="${Qt6_DIR}" \
+    "${CMAKE_EXTRA_FLAGS[@]}"
 
 echo "Building..."
 BUILD_TARGET_ARGS=()
@@ -145,15 +170,68 @@ elif [[ "${RUN_API_ONLY}" == "true" ]]; then
     read -r -a TARGET_LIST <<< "${RUN_API_TARGETS}"
     BUILD_TARGET_ARGS=(--target "${TARGET_LIST[@]}")
 fi
-cmake --build build --parallel "$(nproc)" "${BUILD_TARGET_ARGS[@]}"
+cmake --build "${BUILD_DIR}" --parallel "$(nproc)" "${BUILD_TARGET_ARGS[@]}"
 
 echo "Running tests..."
-cd build
-CTEST_ARGS=(--output-on-failure --parallel 2)
+cd "${BUILD_DIR}"
+CTEST_ARGS=(--output-on-failure)
+if [[ "${RUN_COVERAGE}" == "true" ]]; then
+    # Serial execution avoids .gcda write races for shared object files.
+    CTEST_ARGS+=(--parallel 1)
+else
+    CTEST_ARGS+=(--parallel 2)
+fi
 if [[ -n "${RUN_EFFECTIVE_FILTER}" ]]; then
     CTEST_ARGS+=(-R "${RUN_EFFECTIVE_FILTER}")
 fi
 ctest "${CTEST_ARGS[@]}"
+
+if [[ "${RUN_COVERAGE}" == "true" ]]; then
+    echo ""
+    echo "-- Coverage Summary --"
+
+    gcovr \
+        --root /workspace \
+        --object-directory "${BUILD_DIR}" \
+        --gcov-executable gcov-12 \
+        --filter '/workspace/src/' \
+        --exclude '/workspace/src/main\.cpp' \
+        --exclude '.*\.moc$' \
+        --exclude '.*moc_.*\.cpp$' \
+        --exclude '.*qrc_.*\.cpp$' \
+        --exclude '.*ui_.*\.h$' \
+        --exclude-unreachable-branches \
+        --exclude-throw-branches \
+        --json-summary /tmp/summary.json \
+        --csv /tmp/per-file.csv \
+        >/tmp/gcovr.log
+
+    python3 - <<'PY'
+import csv
+import json
+
+s = json.load(open('/tmp/summary.json'))
+print(f"All files - Lines: {s['line_percent']}% ({s['line_covered']}/{s['line_total']})")
+print(f"All files - Functions: {s['function_percent']}% ({s['function_covered']}/{s['function_total']})")
+print(f"All files - Branches: {s['branch_percent']}% ({s['branch_covered']}/{s['branch_total']})")
+
+rows = []
+with open('/tmp/per-file.csv', newline='') as f:
+    r = csv.DictReader(f)
+    for row in r:
+        lt = int(row.get('line_total') or 0)
+        lc = int(row.get('line_covered') or 0)
+        unc = lt - lc
+        lp = float(row.get('line_percent') or 0) * 100
+        score = unc * lt
+        rows.append((score, unc, lt, lp, row.get('filename', '')))
+
+rows.sort(reverse=True)
+print('Top ROI gaps (score|uncovered|loc|line%|file):')
+for score, unc, lt, lp, fn in rows[:12]:
+    print(f"{score}|{unc}|{lt}|{lp:.1f}|{fn}")
+PY
+fi
 
 echo ""
 echo "-- Test Summary --"
@@ -189,6 +267,7 @@ docker compose -f "${COMPOSE_FILE}" run --rm \
     -e QT_QPA_PLATFORM=offscreen \
     -e RUN_UNIT_ONLY="${UNIT_ONLY}" \
     -e RUN_API_ONLY="${API_ONLY}" \
+    -e RUN_COVERAGE="${COVERAGE}" \
     -e RUN_EFFECTIVE_FILTER="${EFFECTIVE_FILTER}" \
     -e RUN_UNIT_TARGETS="${UNIT_TARGETS_CMAKE}" \
     -e RUN_API_TARGETS="${API_TARGETS_CMAKE}" \

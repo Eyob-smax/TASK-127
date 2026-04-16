@@ -101,6 +101,15 @@ ENV Qt6_DIR=/opt/Qt/${QT_VERSION}/gcc_64/lib/cmake/Qt6
 ENV PATH=/opt/Qt/${QT_VERSION}/gcc_64/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/Qt/${QT_VERSION}/gcc_64/lib
 
+# Coverage tooling: lcov (genhtml + lcov) and gcovr (text + xml reports).
+# Installed as a dedicated layer so adding it does not invalidate the large
+# Qt install above. Used by the coverage workflow documented in run_tests.sh
+# (--coverage flag) — not part of the normal test run.
+RUN apt-get update && apt-get install -y --no-install-recommends lcov \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install --no-cache-dir "gcovr>=6.0,<8.0" \
+    && rm -rf ~/.cache/pip
+
 # ── Build stage ─────────────────────────────────────────────────────────────
 
 FROM base AS builder
