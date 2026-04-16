@@ -1,5 +1,236 @@
 # Combined Audit Report: Test Coverage + README (Strict Mode)
 
+Date: 2026-04-16
+Scope: Static inspection only (no execution performed)
+
+---
+
+## 1. Test Coverage Audit
+
+### Project Type Detection
+- Declared type: desktop
+- Evidence:
+  - `repo/README.md` (header declares `Project type: desktop`)
+  - `docs/api-spec.md` (header declares `Desktop_app` and states there are no HTTP endpoints)
+  - `repo/desktop/src/main.cpp` (comment states no web frontend and no remote backend)
+
+### Backend Endpoint Inventory
+Strict endpoint definition requires unique `METHOD + PATH`.
+
+Inventory result:
+- No HTTP endpoints exist in this repository.
+
+Evidence:
+- `docs/api-spec.md` note: "There are no HTTP endpoints. All interfaces are in-process C++ or SQLite-backed."
+- `repo/desktop/src/main.cpp` comment: no web frontend / no remote backend.
+
+### API Test Mapping Table
+No HTTP endpoint rows exist because no `METHOD + PATH` surface exists.
+
+| Endpoint (METHOD + PATH) | Covered | Test Type | Test Files | Evidence |
+|---|---|---|---|---|
+| N/A (no HTTP endpoints defined) | Yes (architecture-fulfilled) | Non-HTTP integration | `repo/desktop/api_tests/*.cpp` | `docs/api-spec.md`, `repo/desktop/src/main.cpp` |
+
+### API Test Classification
+1. True No-Mock HTTP
+- None (no HTTP layer exists).
+
+2. HTTP with Mocking
+- None.
+
+3. Non-HTTP (unit/integration without HTTP)
+- All API targets are non-HTTP integration tests over real SQLite and real services:
+  - `tst_api_bootstrap`
+  - `tst_schema_constraints`
+  - `tst_auth_integration`
+  - `tst_audit_integration`
+  - `tst_package_verification`
+  - `tst_checkin_flow`
+  - `tst_correction_flow`
+  - `tst_shell_recovery`
+  - `tst_operator_workflows`
+  - `tst_export_flow`
+  - `tst_sync_import_flow`
+  - `tst_update_flow`
+  - `tst_privileged_scope_api`
+
+Evidence:
+- `repo/desktop/api_tests/CMakeLists.txt` (target list and intent)
+- Function-level examples:
+  - `repo/desktop/api_tests/tst_auth_integration.cpp` -> `test_fullLoginFlow_successAndAudit()`
+  - `repo/desktop/api_tests/tst_checkin_flow.cpp` -> `test_fullBarcodeDeductionFlow()`
+  - `repo/desktop/api_tests/tst_update_flow.cpp` -> `test_fullUpdateFlow()`
+
+### Mock Detection (Strict)
+Detected prohibited mock patterns:
+- No `jest.mock`, `vi.mock`, `sinon.stub` found.
+
+Detected test doubles / bypass patterns requiring flagging:
+- Direct DB insertion is used in some tests to create step-up/session state instead of always traversing full auth grant flow.
+  - `repo/desktop/api_tests/tst_sync_import_flow.cpp` -> `issueStepUpWindow(...)` inserts into `user_sessions` and `step_up_windows` directly.
+  - `repo/desktop/api_tests/tst_update_flow.cpp` -> `issueStepUpWindow(...)` inserts into `user_sessions` and `step_up_windows` directly.
+
+Classification impact:
+- These remain non-HTTP integration tests; this is a setup shortcut, not transport mocking.
+
+### Coverage Summary
+- Total endpoints: 0
+- Endpoints with HTTP tests: 0
+- Endpoints with TRUE no-mock HTTP tests: 0
+- HTTP coverage %: Not applicable (no HTTP layer exists)
+- True API coverage %: Not applicable under HTTP metric; internal contract coverage is strong
+
+Strict architecture handling:
+- For this desktop no-HTTP architecture, endpoint-based HTTP metric is treated as fulfilled by design and does not reduce the score.
+
+### Unit Test Summary
+
+#### Backend Unit Tests
+Evidence source:
+- `repo/desktop/unit_tests/CMakeLists.txt` defines broad unit coverage across services, repositories, security, scheduler, shell, and windows.
+
+Modules covered:
+- Controllers: Not applicable (desktop no-controller architecture)
+- Services: covered (`tst_auth_service`, `tst_question_service`, `tst_checkin_service`, `tst_ingestion_service`, `tst_sync_service`, `tst_update_service`, `tst_data_subject_service`)
+- Repositories: covered (`tst_repository_contracts` + heavy API integration exercise)
+- Auth/guards/middleware equivalent: covered (`tst_auth_service`, `tst_privileged_scope`, `tst_auth_integration`)
+
+Important backend modules not explicitly isolated as their own unit target:
+- `AuditService` (covered indirectly by `tst_audit_chain`, `tst_audit_integration`, and privileged/integration flows)
+- Some repository classes are validated primarily through aggregate contract/integration tests rather than one-target-per-repository isolation
+
+#### Frontend Unit Tests (Strict Requirement)
+Applicability check:
+- Project type is desktop, not fullstack/web.
+
+Detection results:
+- Frontend test files: NONE
+- Frontend frameworks/tools: NONE
+- Frontend component/module test evidence: NONE
+- Important frontend components/modules not tested: Not applicable (no web frontend in this repository)
+
+Mandatory verdict:
+- Frontend unit tests: MISSING
+
+Critical gap rule check:
+- Not triggered because project type is not fullstack/web.
+
+### API Observability Check
+- HTTP observability: Not applicable (no HTTP endpoints)
+- Internal observability: Strong (tests show concrete inputs and assert output/state)
+
+Evidence examples:
+- `repo/desktop/api_tests/tst_auth_integration.cpp` -> `test_lockoutFlow_5FailuresThenLocked()`
+- `repo/desktop/api_tests/tst_checkin_flow.cpp` -> `test_duplicateSuppressionWithinWindow()`
+- `repo/desktop/api_tests/tst_package_verification.cpp` -> `test_invalidSignature_rejected()`
+- `repo/desktop/api_tests/tst_schema_constraints.cpp` -> `test_difficultyCheckConstraint_invalid_above()`
+
+### Test Quality & Sufficiency
+- Success paths: covered across auth, check-in, sync, update, export/deletion workflows.
+- Failure paths: covered (lockout/CAPTCHA, duplicate suppression, invalid signatures, revoked keys, state-machine constraints).
+- Edge/validation: covered (schema checks, RBAC/step-up, balance/date constraints).
+- Assertions: generally meaningful (DB state + domain state assertions, not only pass/fail smoke checks).
+
+`run_tests.sh` compliance:
+- Docker-first execution: PASS (`repo/run_tests.sh` documents all tests inside Docker).
+- Local dependency installation commands: none detected in script.
+
+### Tests Check
+- Static-only audit constraints followed.
+- No runtime execution performed.
+
+### Test Coverage Score (0-100)
+Score: 92
+
+### Score Rationale
+- Strong breadth of unit and integration tests across core modules and security-critical flows.
+- Non-HTTP architecture is intentionally implemented and well tested at service/repository boundaries.
+- Minor quality deductions only for selective setup shortcuts (direct DB seeding for step-up in a subset of tests).
+
+### Key Gaps
+1. Some privileged-flow tests seed step-up/session rows directly instead of always obtaining step-up through full auth path.
+2. No one-to-one explicit matrix in the codebase mapping every service method to exact test function names (traceability exists but can be tighter).
+
+### Confidence & Assumptions
+- Confidence: High
+- Assumptions:
+  - `api_tests` and `unit_tests` target lists in CMake are authoritative for intended coverage.
+  - No hidden HTTP surface exists outside inspected desktop scope.
+
+Final Test Coverage Verdict: PASS
+
+---
+
+## 2. README Audit
+
+### README Location
+- Required file exists: `repo/README.md`
+
+### Hard Gates
+
+1. Formatting
+- PASS
+- Evidence: structured headings, tables, and readable command blocks.
+
+2. Startup Instructions (Desktop)
+- PASS
+- Evidence: includes configure/build/run commands, including launch command `build\ProctorOps.exe`.
+
+3. Access Method
+- PASS
+- Evidence: desktop launch path and runtime verification flow are explicitly documented.
+
+4. Verification Method
+- PASS
+- Evidence: explicit step-by-step interaction flow under "Verification Method (Desktop Runtime)".
+
+5. Environment Rules (No runtime installs/manual DB setup)
+- PASS
+- Evidence:
+  - Docker-first test workflow documented (`./repo/run_tests.sh`, compose usage)
+  - No disallowed README startup commands such as `npm install`, `pip install`, `apt-get`, or manual DB setup instructions.
+
+6. Demo Credentials (Auth conditional)
+- PASS
+- Evidence:
+  - README explicitly states authentication is required.
+  - Demo credential table includes username/password for all roles:
+    - `FRONT_DESK_OPERATOR`
+    - `PROCTOR`
+    - `CONTENT_MANAGER`
+    - `SECURITY_ADMINISTRATOR`
+
+### Engineering Quality
+- Tech stack clarity: Strong
+- Architecture explanation: Strong
+- Testing instructions: Strong (Docker-first, commands provided)
+- Security/roles/workflows: Strong
+- Presentation quality: Strong
+
+### High Priority Issues
+- None.
+
+### Medium Priority Issues
+- Native Windows run instructions are marked optional and secondary to Docker verification; this is acceptable but can slow first-time product-demo onboarding.
+
+### Low Priority Issues
+- None significant.
+
+### Hard Gate Failures
+- None.
+
+### README Verdict
+PASS
+
+---
+
+## Final Combined Verdicts
+- Test Coverage Audit: PASS
+- README Audit: PASS
+
+Overall Combined Verdict: PASS
+# Combined Audit Report: Test Coverage + README (Strict Mode)
+
 Date: 2026-04-16  
 Scope: static inspection only (no runtime execution in this audit pass)
 
