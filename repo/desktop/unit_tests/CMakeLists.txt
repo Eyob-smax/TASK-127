@@ -4,7 +4,7 @@
 # Tests are organized one executable per module. Each executable is registered
 # with CTest. New test targets are added here as modules are implemented.
 #
-# Active targets (48):
+# Active targets (50):
 #   tst_bootstrap — verifies Qt Test framework and CMake integration
 #   tst_app_settings — AppSettings default values, round-trip, and path honesty
 #   tst_domain_validation — domain model invariants and Validation.h constants
@@ -52,6 +52,8 @@
 #   tst_app_context — AppContext default session state and owned component management
 #   tst_repository_contracts — direct repository contract coverage across data-access modules
 #   tst_package_verifier — package signature and digest verification unit coverage
+#   tst_audit_service — AuditService role-gated query/verification and retention guards
+#   tst_ed25519_signer — Ed25519Signer key generation and signing failure/success behavior
 
 find_package(Qt6 REQUIRED COMPONENTS Test Sql Widgets)
 
@@ -216,3 +218,5 @@ add_proctorops_test(tst_app_context          tst_app_context.cpp)
 # ── Repository and package verification contract tests ──────────────────────
 add_proctorops_test(tst_repository_contracts tst_repository_contracts.cpp)
 add_proctorops_test(tst_package_verifier     tst_package_verifier.cpp)
+add_proctorops_test(tst_audit_service        tst_audit_service.cpp)
+add_proctorops_test(tst_ed25519_signer       tst_ed25519_signer.cpp)

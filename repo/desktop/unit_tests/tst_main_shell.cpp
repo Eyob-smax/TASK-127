@@ -6,11 +6,24 @@
 #include <QSqlQuery>
 #include <QMdiArea>
 #include <QMdiSubWindow>
+#include <QDateTime>
 
 #include "windows/MainShell.h"
+#include "windows/CheckInWindow.h"
+#include "windows/QuestionBankWindow.h"
 #include "app/ActionRouter.h"
 #include "app/AppSettings.h"
 #include "app/WorkspaceState.h"
+
+class FilterProbeWindow : public QWidget {
+    Q_OBJECT
+
+public:
+    int activateFilterCallCount = 0;
+
+public slots:
+    void activateFilter() { ++activateFilterCallCount; }
+};
 
 class TstMainShell : public QObject {
     Q_OBJECT
@@ -28,6 +41,8 @@ private slots:
     void test_restoreWorkspace_reopensTrackedWindows();
     void test_lockUnlock_emitsSignalsAndState();
     void test_registerShellActions_exposesExpectedIds();
+    void test_dispatchWindowActions_openAndTrackWorkspaceState();
+    void test_advancedFilter_dispatchesToActiveWindow();
 };
 
 void TstMainShell::initTestCase()
@@ -157,6 +172,50 @@ void TstMainShell::test_registerShellActions_exposesExpectedIds()
     QVERIFY(hasPalette);
     QVERIFY(hasFilter);
     QVERIFY(hasCheckin);
+}
+
+void TstMainShell::test_dispatchWindowActions_openAndTrackWorkspaceState()
+{
+    ActionRouter router;
+    WorkspaceState ws(m_db);
+    QVERIFY(ws.load());
+    AppSettings settings;
+
+    MainShell shell(router, ws, settings, nullptr);
+    auto* mdi = shell.findChild<QMdiArea*>();
+    QVERIFY(mdi != nullptr);
+
+    QVERIFY(router.dispatch(QLatin1String(CheckInWindow::WindowId)));
+    QVERIFY(router.dispatch(QLatin1String(QuestionBankWindow::WindowId)));
+
+    QCOMPARE(mdi->subWindowList().size(), 2);
+    QVERIFY(ws.snapshot().openWindows.contains(QLatin1String(CheckInWindow::WindowId)));
+    QVERIFY(ws.snapshot().openWindows.contains(QLatin1String(QuestionBankWindow::WindowId)));
+
+    // A second dispatch should focus existing sub-window, not duplicate it.
+    QVERIFY(router.dispatch(QLatin1String(CheckInWindow::WindowId)));
+    QCOMPARE(mdi->subWindowList().size(), 2);
+}
+
+void TstMainShell::test_advancedFilter_dispatchesToActiveWindow()
+{
+    ActionRouter router;
+    WorkspaceState ws(m_db);
+    QVERIFY(ws.load());
+    AppSettings settings;
+
+    MainShell shell(router, ws, settings, nullptr);
+    auto* mdi = shell.findChild<QMdiArea*>();
+    QVERIFY(mdi != nullptr);
+
+    auto* probe = new FilterProbeWindow();
+    auto* sub = mdi->addSubWindow(probe);
+    sub->setObjectName(QStringLiteral("window.filter_probe"));
+    sub->show();
+    mdi->setActiveSubWindow(sub);
+
+    QVERIFY(router.dispatch(QStringLiteral("shell.advanced_filter")));
+    QCOMPARE(probe->activateFilterCallCount, 1);
 }
 
 QTEST_MAIN(TstMainShell)

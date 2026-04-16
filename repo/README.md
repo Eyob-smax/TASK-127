@@ -354,11 +354,11 @@ All tests are executed inside Docker via `repo/run_tests.sh`. Tests are organize
 
 | Directory | Contents | Count |
 |---|---|---|
-| `repo/desktop/unit_tests/` | Qt Test / CTest unit tests per module | 45 test files, ~300+ test cases |
+| `repo/desktop/unit_tests/` | Qt Test / CTest unit tests per module | 50 test files, ~330+ test cases |
 | `repo/desktop/api_tests/` | Integration-style tests for internal service contracts | 13 test files, ~90+ test cases |
 
 The runner prints a post-run summary with:
-- `Total test targets` (CTests selected by filter; full suite currently 58)
+- `Total test targets` (CTests selected by filter; full suite currently 63)
 - `Total QTest functions` (sum of `-functions` output across built test binaries)
 
 For the complete requirement-to-test mapping, see `docs/test-traceability.md`.
@@ -384,7 +384,7 @@ When `--unit-only` or `--api-only` is selected, the runner compiles only the
 corresponding CMake test targets before executing CTest. This keeps isolated
 suite runs focused and avoids unrelated target build failures.
 
-**Unit test targets (45):**
+**Unit test targets (50):**
 
 ```bash
 ./build/unit_tests/tst_bootstrap
@@ -415,7 +415,9 @@ suite runs focused and avoids unrelated target build failures.
 ./build/unit_tests/tst_question_editor
 ./build/unit_tests/tst_audit_viewer
 ./build/unit_tests/tst_masked_field_widget
+./build/unit_tests/tst_barcode_input
 ./build/unit_tests/tst_login_window
+./build/unit_tests/tst_step_up_dialog
 ./build/unit_tests/tst_sync_window
 ./build/unit_tests/tst_update_window
 ./build/unit_tests/tst_data_subject_window
@@ -429,9 +431,12 @@ suite runs focused and avoids unrelated target build failures.
 ./build/unit_tests/tst_question_bank_window
 ./build/unit_tests/tst_application
 ./build/unit_tests/tst_app_bootstrap
+./build/unit_tests/tst_main_entrypoint
 ./build/unit_tests/tst_app_context
 ./build/unit_tests/tst_repository_contracts
 ./build/unit_tests/tst_package_verifier
+./build/unit_tests/tst_audit_service
+./build/unit_tests/tst_ed25519_signer
 ```
 
 **Integration test targets (13):**

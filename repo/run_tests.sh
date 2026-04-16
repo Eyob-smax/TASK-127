@@ -79,12 +79,14 @@ UNIT_TARGETS=(
     tst_question_service tst_checkin_service tst_job_scheduler tst_job_checkpoint
     tst_ingestion_service tst_action_routing tst_command_palette tst_workspace_state
     tst_crash_recovery tst_tray_mode tst_checkin_window tst_question_editor
-    tst_audit_viewer tst_masked_field_widget tst_login_window tst_sync_window tst_update_window
+    tst_audit_viewer tst_masked_field_widget tst_barcode_input tst_login_window tst_step_up_dialog
+    tst_sync_window tst_update_window
     tst_data_subject_window tst_ingestion_monitor_window
     tst_sync_service tst_update_service tst_data_subject_service
     tst_security_admin_window tst_privileged_scope
-    tst_main_shell tst_question_bank_window tst_application tst_app_bootstrap tst_app_context
-    tst_repository_contracts tst_package_verifier
+    tst_main_shell tst_question_bank_window tst_application tst_app_bootstrap tst_main_entrypoint
+    tst_app_context tst_repository_contracts tst_package_verifier tst_audit_service
+    tst_ed25519_signer
 )
 
 API_TARGETS=(
@@ -95,7 +97,7 @@ API_TARGETS=(
 )
 
 if [[ "${UNIT_ONLY}" == "true" ]]; then
-    SUITE_FILTER="tst_(bootstrap|app_settings|domain_validation|migration|crypto|auth_service|audit_chain|clipboard_guard|masked_field|error_formatter|key_store|logger|captcha_generator|performance_observer|question_service|checkin_service|job_scheduler|job_checkpoint|ingestion_service|action_routing|command_palette|workspace_state|crash_recovery|tray_mode|checkin_window|question_editor|audit_viewer|masked_field_widget|login_window|sync_window|update_window|data_subject_window|ingestion_monitor_window|sync_service|update_service|data_subject_service|security_admin_window|privileged_scope|main_shell|question_bank_window|application|app_bootstrap|app_context|repository_contracts|package_verifier)"
+    SUITE_FILTER="tst_(bootstrap|app_settings|domain_validation|migration|crypto|auth_service|audit_chain|clipboard_guard|masked_field|error_formatter|key_store|logger|captcha_generator|performance_observer|question_service|checkin_service|job_scheduler|job_checkpoint|ingestion_service|action_routing|command_palette|workspace_state|crash_recovery|tray_mode|checkin_window|question_editor|audit_viewer|masked_field_widget|barcode_input|login_window|step_up_dialog|sync_window|update_window|data_subject_window|ingestion_monitor_window|sync_service|update_service|data_subject_service|security_admin_window|privileged_scope|main_shell|question_bank_window|application|app_bootstrap|main_entrypoint|app_context|repository_contracts|package_verifier|audit_service|ed25519_signer)"
 elif [[ "${API_ONLY}" == "true" ]]; then
     SUITE_FILTER="tst_(api_bootstrap|schema_constraints|auth_integration|audit_integration|package_verification|checkin_flow|correction_flow|shell_recovery|operator_workflows|export_flow|sync_import_flow|update_flow|privileged_scope_api)"
 fi
@@ -110,11 +112,11 @@ echo "=========================================="
 echo "  Compose file: ${COMPOSE_FILE}"
 echo "  Rebuild:      ${REBUILD}"
 if [[ "${UNIT_ONLY}" == "true" ]]; then
-    echo "  Suite:        unit tests only (45 targets)"
+    echo "  Suite:        unit tests only (50 targets)"
 elif [[ "${API_ONLY}" == "true" ]]; then
     echo "  Suite:        integration tests only (13 targets)"
 else
-    echo "  Suite:        all tests (45 unit + 13 integration)"
+    echo "  Suite:        all tests (50 unit + 13 integration)"
 fi
 echo "  Coverage:     ${COVERAGE}"
 echo "  Test filter:  ${EFFECTIVE_FILTER:-<all>}"
