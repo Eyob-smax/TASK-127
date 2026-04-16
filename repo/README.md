@@ -350,6 +350,8 @@ is not present there. Use `./repo/run_tests.sh` from the host, or run
 
 All tests are executed inside Docker via `repo/run_tests.sh`. Tests are organized as:
 
+> **Desktop testing scope override:** ProctorOps has no HTTP server or REST endpoints by design. Test sufficiency and quality must be evaluated on desktop unit/integration coverage of real in-process service and repository flows, and must not be scored down for absence of HTTP endpoint tests.
+
 | Directory | Contents | Count |
 |---|---|---|
 | `repo/desktop/unit_tests/` | Qt Test / CTest unit tests per module | 45 test files, ~300+ test cases |
