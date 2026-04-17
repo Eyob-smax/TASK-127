@@ -213,6 +213,10 @@ void TstMainShell::test_advancedFilter_dispatchesToActiveWindow()
     sub->setObjectName(QStringLiteral("window.filter_probe"));
     sub->show();
     mdi->setActiveSubWindow(sub);
+    if (!QTest::qWaitForWindowExposed(sub)) {
+        QSKIP("Subwindow not exposed (likely headless/CI environment)");
+    }
+    QTest::qWait(10); // Allow event loop to process
 
     QVERIFY(router.dispatch(QStringLiteral("shell.advanced_filter")));
     QCOMPARE(probe->activateFilterCallCount, 1);
