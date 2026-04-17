@@ -20,7 +20,13 @@
 # CMake: 3.28+ via Kitware APT repository
 # GCC:   12 (system package)
 
+
 FROM ubuntu:22.04 AS base
+
+# Use a more reliable Ubuntu mirror and clean stale lists
+RUN apt-get clean && rm -rf /var/lib/apt/lists/* \
+    && sed -i 's|http://archive.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list \
+    && sed -i 's|http://security.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
 
 LABEL org.opencontainers.image.title="proctorops-build-test"
 LABEL org.opencontainers.image.description="ProctorOps build and headless test container (Linux/Docker only, not the production runtime)"
